@@ -1,13 +1,17 @@
 version: "3.8"
+
 services:
   # === Grafana: UI untuk lihat & search log ===
   grafana:
     image: grafana/grafana-enterprise:12.4
     restart: unless-stopped
+
     ports:
       - "3001:3000"
+
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=false
+
     entrypoint: |
       sh -c "
       mkdir -p /etc/grafana/provisioning/datasources &&
@@ -21,23 +25,30 @@ services:
           editable: true' > /etc/grafana/provisioning/datasources/datasource.yaml &&
       exec /run.sh
       "
+
     volumes:
       - grafana-storage:/var/lib/grafana
+
     depends_on:
       - loki
+
     networks:
       - logging
-  # === Loki: database/penyimpanan log (dengan retention 30 hari) ===
+
+  # === Loki: database/penyimpanan log ===
   loki:
     image: grafana/loki:3.4
     restart: unless-stopped
+
     entrypoint: |
       sh -c "
       mkdir -p /etc/loki &&
       echo 'auth_enabled: false
+
       server:
         http_listen_port: 3100
         grpc_listen_port: 9096
+
       common:
         path_prefix: /loki
         storage:
@@ -48,6 +59,7 @@ services:
         ring:
           kvstore:
             store: inmemory
+
       schema_config:
         configs:
           - from: 2020-10-24
@@ -57,8 +69,10 @@ services:
             index:
               prefix: index_
               period: 24h
+
       limits_config:
         retention_period: 720h
+
       compactor:
         working_directory: /loki/compactor
         compaction_interval: 10m
@@ -68,50 +82,76 @@ services:
         delete_request_store: filesystem' > /etc/loki/loki-config.yaml &&
       exec /usr/bin/loki -config.file=/etc/loki/loki-config.yaml
       "
+
     volumes:
       - loki-storage:/loki
+
     networks:
       - logging
-  # === Promtail: agent yang baca log Docker & kirim ke Loki ===
+
+  # === Promtail: membaca log SEMUA container Docker di VPS ===
   promtail:
     image: grafana/promtail:3.4
     restart: unless-stopped
+
     entrypoint: |
       sh -c "
       mkdir -p /etc/promtail &&
       echo 'server:
         http_listen_port: 9080
         grpc_listen_port: 0
+
       positions:
         filename: /tmp/positions.yaml
+
       clients:
         - url: http://loki:3100/loki/api/v1/push
+
       scrape_configs:
         - job_name: docker
+
           docker_sd_configs:
             - host: unix:///var/run/docker.sock
               refresh_interval: 5s
+
           relabel_configs:
             - source_labels: [__meta_docker_container_name]
               regex: /(.*)
               target_label: container
+
             - source_labels: [__meta_docker_container_name]
               regex: /(.*)
               target_label: service_name
+
             - source_labels: [__meta_docker_container_log_stream]
-              target_label: stream' > /etc/promtail/config.yaml &&
+              target_label: stream
+
+            - source_labels: [__meta_docker_container_log_path]
+              target_label: __path__' > /etc/promtail/config.yaml &&
       exec /usr/bin/promtail -config.file=/etc/promtail/config.yaml
       "
+
     volumes:
+      # Membaca file log Docker
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+
+      # Agar Promtail bisa menemukan semua container Docker
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # Menyimpan posisi terakhir pembacaan log
+      - promtail-positions:/tmp
+
     depends_on:
       - loki
+
     networks:
       - logging
+
 networks:
   logging:
     driver: bridge
+
 volumes:
   grafana-storage: {}
   loki-storage: {}
+  promtail-positions: {}
