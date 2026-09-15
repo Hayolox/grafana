@@ -91,7 +91,7 @@ services:
     networks:
       - logging
 
-  # === Promtail: membaca log SEMUA container Docker di VPS ===
+  # === Promtail: hanya membaca log service yang dipilih ===
   promtail:
     image: grafana/promtail:3.4
     restart: unless-stopped
@@ -117,7 +117,12 @@ services:
               refresh_interval: 5s
 
           relabel_configs:
-            # Docker Swarm service - stabil walaupun container recreate
+            # Hanya log dari service yang dipilih
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
+              regex: (primeerp-apibe-f0gld3|warna-kalimantan-warna-kalimantan-9nohns|vidshub-newmain-8vd1ne|arna-kalimantan-admin-xboab3)
+              action: keep
+
+            # Nama service
             - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
               target_label: service
 
@@ -135,7 +140,7 @@ services:
       # Membaca file log Docker
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
 
-      # Agar Promtail bisa menemukan semua container Docker
+      # Agar Promtail bisa menemukan container Docker
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
       # Menyimpan posisi terakhir pembacaan log
