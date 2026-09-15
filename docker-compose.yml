@@ -40,8 +40,19 @@ services:
     image: grafana/loki:3.4
     restart: unless-stopped
 
+    environment:
+      # Temporary: hapus data Loki lama satu kali
+      - WIPE_LOKI_ONCE=true
+
     entrypoint: |
       sh -c "
+      if [ \"\$WIPE_LOKI_ONCE\" = \"true\" ] && [ ! -f /loki/.wipe-done ]; then
+        echo '=== Cleaning old Loki data ==='
+        rm -rf /loki/*
+        touch /loki/.wipe-done
+        echo '=== Loki data cleaned ==='
+      fi
+
       mkdir -p /etc/loki &&
       echo 'auth_enabled: false
 
