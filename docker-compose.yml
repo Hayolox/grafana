@@ -40,19 +40,8 @@ services:
     image: grafana/loki:3.4
     restart: unless-stopped
 
-    environment:
-      # Temporary: hapus data Loki lama satu kali
-      - WIPE_LOKI_ONCE=true
-
     entrypoint: |
       sh -c "
-      if [ \"\$WIPE_LOKI_ONCE\" = \"true\" ] && [ ! -f /loki/.wipe-done ]; then
-        echo '=== Cleaning old Loki data ==='
-        rm -rf /loki/*
-        touch /loki/.wipe-done
-        echo '=== Loki data cleaned ==='
-      fi
-
       mkdir -p /etc/loki &&
       echo 'auth_enabled: false
 
@@ -138,9 +127,13 @@ services:
               regex: ^(primeerp-apibe-f0gld3|warna-kalimantan-admin-xboab3|warna-kalimantan-warna-kalimantan-9nohns|vidshub-newmain-8vd1ne)$
               action: keep
 
-            # Nama service
+            # Nama service (label custom kita)
             - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
               target_label: service
+
+            # Nama service_name (dipakai Loki untuk deteksi otomatis, biar tidak jadi unknown_service)
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
+              target_label: service_name
 
             # stdout / stderr
             - source_labels: [__meta_docker_container_log_stream]
