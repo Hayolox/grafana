@@ -121,11 +121,6 @@ services:
             - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
               target_label: service
 
-            # Nama container - untuk debugging
-            - source_labels: [__meta_docker_container_name]
-              regex: /(.*)
-              target_label: container
-
             # stdout / stderr
             - source_labels: [__meta_docker_container_log_stream]
               target_label: stream
