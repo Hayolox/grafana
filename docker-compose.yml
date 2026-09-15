@@ -74,6 +74,7 @@ services:
         retention_period: 2160h
         reject_old_samples: true
         reject_old_samples_max_age: 2160h
+
       compactor:
         working_directory: /loki/compactor
         compaction_interval: 10m
@@ -116,17 +117,20 @@ services:
               refresh_interval: 5s
 
           relabel_configs:
+            # Docker Swarm service - stabil walaupun container recreate
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
+              target_label: service
+
+            # Nama container - untuk debugging
             - source_labels: [__meta_docker_container_name]
               regex: /(.*)
               target_label: container
 
-            - source_labels: [__meta_docker_container_name]
-              regex: /(.*)
-              target_label: service_name
-
+            # stdout / stderr
             - source_labels: [__meta_docker_container_log_stream]
               target_label: stream
 
+            # Lokasi file log Docker
             - source_labels: [__meta_docker_container_log_path]
               target_label: __path__' > /etc/promtail/config.yaml &&
       exec /usr/bin/promtail -config.file=/etc/promtail/config.yaml
