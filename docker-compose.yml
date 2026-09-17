@@ -1,68 +1,50 @@
-name: loggingstack
+version: "3.8"
 
 services:
-  loki:
-    image: grafana/loki:3.4
-    command:
-      - -config.file=/etc/loki/config.yaml
-    ports:
-      - "3100:3100"
-    volumes:
-      - loki-data:/loki
-    configs:
-      - source: loki-config
-        target: /etc/loki/config.yaml
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://localhost:3100/ready | grep -q ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 20s
-
-  promtail:
-    image: grafana/promtail:3.4
-    command:
-      - -config.file=/etc/promtail/config.yaml
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - promtail-positions:/tmp
-    configs:
-      - source: promtail-config
-        target: /etc/promtail/config.yaml
-    depends_on:
-      loki:
-        condition: service_healthy
-    restart: unless-stopped
-
+  # === Grafana: UI untuk lihat & search log ===
   grafana:
     image: grafana/grafana-enterprise:12.4
+    restart: unless-stopped
+
     ports:
       - "3001:3000"
+
     environment:
-      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: change-this-password
-      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+    entrypoint: |
+      sh -c "
+      mkdir -p /etc/grafana/provisioning/datasources &&
+      echo 'apiVersion: 1
+      datasources:
+        - name: Loki
+          type: loki
+          access: proxy
+          url: http://loki:3100
+          isDefault: true
+          editable: true' > /etc/grafana/provisioning/datasources/datasource.yaml &&
+      exec /run.sh
+      "
+
     volumes:
-      - grafana-data:/var/lib/grafana
-    configs:
-      - source: grafana-datasource
-        target: /etc/grafana/provisioning/datasources/loki.yaml
+      - grafana-storage:/var/lib/grafana
+
     depends_on:
       loki:
         condition: service_healthy
+
+    networks:
+      - logging
+
+  # === Loki: database/penyimpanan log ===
+  loki:
+    image: grafana/loki:3.4
     restart: unless-stopped
 
-volumes:
-  loki-data:
-  promtail-positions:
-  grafana-data:
-
-configs:
-  loki-config:
-    content: |
-      auth_enabled: false
+    entrypoint: |
+      sh -c "
+      mkdir -p /etc/loki &&
+      echo 'auth_enabled: false
 
       server:
         http_listen_port: 3100
@@ -70,18 +52,18 @@ configs:
 
       common:
         path_prefix: /loki
-        replication_factor: 1
-        ring:
-          kvstore:
-            store: inmemory
         storage:
           filesystem:
             chunks_directory: /loki/chunks
             rules_directory: /loki/rules
+        replication_factor: 1
+        ring:
+          kvstore:
+            store: inmemory
 
       schema_config:
         configs:
-          - from: 2024-01-01
+          - from: 2020-10-24
             store: tsdb
             object_store: filesystem
             schema: v13
@@ -89,25 +71,44 @@ configs:
               prefix: index_
               period: 24h
 
+      limits_config:
+        retention_period: 2160h
+        reject_old_samples: true
+        reject_old_samples_max_age: 2160h
+        unordered_writes: true
+
       compactor:
         working_directory: /loki/compactor
+        compaction_interval: 10m
         retention_enabled: true
-        delete_request_store: filesystem
+        retention_delete_delay: 2h
+        retention_delete_worker_count: 10
+        delete_request_store: filesystem' > /etc/loki/loki-config.yaml &&
+      exec /usr/bin/loki -config.file=/etc/loki/loki-config.yaml
+      "
 
-      limits_config:
-        retention_period: 720h
-        reject_old_samples: true
-        reject_old_samples_max_age: 168h
-        unordered_writes: true
-        ingestion_rate_mb: 8
-        ingestion_burst_size_mb: 16
+    volumes:
+      - loki-storage:/loki
 
-      analytics:
-        reporting_enabled: false
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:3100/ready | grep -q ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
 
-  promtail-config:
-    content: |
-      server:
+    networks:
+      - logging
+
+  # === Promtail: hanya membaca log service yang dipilih ===
+  promtail:
+    image: grafana/promtail:3.4
+    restart: unless-stopped
+
+    entrypoint: |
+      sh -c "
+      mkdir -p /etc/promtail &&
+      echo 'server:
         http_listen_port: 9080
         grpc_listen_port: 0
 
@@ -116,41 +117,75 @@ configs:
 
       clients:
         - url: http://loki:3100/loki/api/v1/push
+          backoff_config:
+            min_period: 500ms
+            max_period: 5m
+            max_retries: 20
 
       scrape_configs:
         - job_name: docker
+
           docker_sd_configs:
             - host: unix:///var/run/docker.sock
               refresh_interval: 10s
 
           relabel_configs:
-            - source_labels:
-                - __meta_docker_container_name
-              regex: '/(.*)'
-              target_label: container
+            # Jangan ambil container logging stack berdasarkan service Compose
+            - source_labels: [__meta_docker_container_label_com_docker_compose_service]
+              regex: ^(loki|grafana|promtail)$
+              action: drop
 
-            - source_labels:
-                - __meta_docker_container_label_com_docker_compose_service
+            # Hanya log dari service aplikasi yang dipilih
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
+              regex: ^(primeerp-apibe-f0gld3|warna-kalimantan-admin-xboab3|warna-kalimantan-warna-kalimantan-9nohns|vidshub-newmain-8vd1ne)$
+              action: keep
+
+            # Nama service
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
               target_label: service
 
-            - source_labels:
-                - __meta_docker_container_label_com_docker_swarm_service_name
-              target_label: swarm_service
+            # Label yang dipakai untuk filter di Loki/Grafana
+            - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
+              target_label: service_name
 
-            - source_labels:
-                - __meta_docker_container_log_stream
+            # stdout / stderr
+            - source_labels: [__meta_docker_container_log_stream]
               target_label: stream
+
+            # Path log Docker berdasarkan container ID.
+            # Ini lebih stabil daripada __meta_docker_container_log_path.
+            - source_labels: [__meta_docker_container_id]
+              target_label: __path__
+              replacement: /var/lib/docker/containers/$1/*-json.log
 
           pipeline_stages:
             - docker: {}
+' > /etc/promtail/config.yaml &&
+      exec /usr/bin/promtail -config.file=/etc/promtail/config.yaml
+      "
 
-  grafana-datasource:
-    content: |
-      apiVersion: 1
-      datasources:
-        - name: Loki
-          type: loki
-          access: proxy
-          url: http://loki:3100
-          isDefault: true
-          editable: true
+    volumes:
+      # Membaca file log Docker
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+
+      # Agar Promtail bisa menemukan container Docker
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # Menyimpan posisi terakhir pembacaan log
+      - promtail-positions:/tmp
+
+    depends_on:
+      loki:
+        condition: service_healthy
+
+    networks:
+      - logging
+
+networks:
+  logging:
+    driver: bridge
+
+volumes:
+  grafana-storage: {}
+  loki-storage: {}
+  promtail-positions: {}
