@@ -158,9 +158,6 @@ services:
               target_label: __path__
               replacement: /var/lib/docker/containers/$1/*-json.log
 
-          pipeline_stages:
-            - docker:
-                max_wait_time: 10s
 ' > /etc/promtail/config.yaml &&
       exec /usr/bin/promtail -config.file=/etc/promtail/config.yaml
       "
