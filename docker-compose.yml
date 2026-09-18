@@ -147,9 +147,6 @@ configs:
             - host: unix:///var/run/docker.sock
               refresh_interval: 10s
           relabel_configs:
-            - source_labels: [__meta_docker_container_label_com_docker_compose_service]
-              regex: ^(loki|grafana|promtail)$
-              action: drop
             - source_labels: [__meta_docker_container_label_com_docker_swarm_service_name]
               regex: ^(primeerp-apibe-f0gld3|warna-kalimantan-admin-xboab3|warna-kalimantan-warna-kalimantan-9nohns|vidshub-newmain-8vd1ne)$
               action: keep
