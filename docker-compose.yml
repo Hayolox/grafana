@@ -110,8 +110,7 @@ configs:
 
       limits_config:
         retention_period: 2160h
-        reject_old_samples: true
-        reject_old_samples_max_age: 2160h
+        reject_old_samples: false
         unordered_writes: true
 
       compactor:
